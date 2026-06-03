@@ -23,3 +23,19 @@ spring:
       hibernate:
         format_sql: ${JPA_FORMAT_SQL:true}
         dialect: org.hibernate.dialect.MySQLDialect
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      base-url: ${OPENAI_BASE_URL}
+      chat:
+        options:
+          model: ${OPENAI_CHAT_MODEL:qwen3.7-max-2026-05-20}
+          temperature: ${OPENAI_TEMPERATURE:0.7}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+# Agent配置
+agent:
+  name: ${AGENT_NAME:aimatrix-agent}
+  max-iterations: ${AGENT_MAX_ITERATIONS:10}
