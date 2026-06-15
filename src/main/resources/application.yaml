@@ -24,13 +24,18 @@ spring:
         format_sql: ${JPA_FORMAT_SQL:true}
         dialect: org.hibernate.dialect.MySQLDialect
   ai:
-    openai:
-      api-key: ${OPENAI_API_KEY}
-      base-url: ${OPENAI_BASE_URL}
+    dashscope:
+      api-key: ${AI_DASHSCOPE_API_KEY}
       chat:
-        options:
-          model: ${OPENAI_CHAT_MODEL:qwen3.7-max-2026-05-20}
-          temperature: ${OPENAI_TEMPERATURE:0.7}
+          options:
+              model: ${AI_DASHSCOPE_CHAT_MODEL}
+#    openai:
+#      api-key: ${OPENAI_API_KEY}
+#      base-url: ${OPENAI_BASE_URL}
+#      chat:
+#        options:
+#          model: ${OPENAI_CHAT_MODEL:qwen3.7-max-2026-05-20}
+#          temperature: ${OPENAI_TEMPERATURE:0.7}
 
 server:
   port: ${SERVER_PORT:8080}

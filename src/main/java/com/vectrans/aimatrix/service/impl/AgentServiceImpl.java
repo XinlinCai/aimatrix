@@ -9,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.UUID;
 
@@ -25,30 +26,24 @@ public class AgentServiceImpl implements AgentService {
 
     @Override
     public AgentResponse chat(AgentRequest request) {
-        String sessionId = resolveSessionId(request.getSessionId());
-
+        if (!StringUtils.hasText(request.getMessage())) {
+            throw new IllegalArgumentException("消息内容不能为空");
+        }
+        String sessionId = StringUtils.hasText(request.getSessionId())
+                ? request.getSessionId()
+                : UUID.randomUUID().toString();
         log.info("Agent chat - sessionId: {}, message: {}", sessionId, request.getMessage());
-
         try {
             RunnableConfig config = RunnableConfig.builder()
                     .threadId(sessionId)
                     .build();
-
             AssistantMessage response = reactAgent.call(request.getMessage(), config);
-            String reply = response.getText();
-
+            String reply = response.getText() != null ? response.getText() : "";
             log.info("Agent reply - sessionId: {}, reply length: {}", sessionId, reply.length());
-
             return new AgentResponse(reply, sessionId);
         } catch (Exception e) {
             log.error("Agent call failed - sessionId: {}", sessionId, e);
-            throw new RuntimeException("AI agent call failed: " + e.getMessage(), e);
+            throw new RuntimeException("AI 助手暂时无法响应，请稍后重试", e);
         }
-    }
-
-    private String resolveSessionId(String sessionId) {
-        return (sessionId != null && !sessionId.isBlank())
-                ? sessionId
-                : UUID.randomUUID().toString();
     }
 }
