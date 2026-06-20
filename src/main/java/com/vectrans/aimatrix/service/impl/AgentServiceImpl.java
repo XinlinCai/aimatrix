@@ -1,5 +1,6 @@
 package com.vectrans.aimatrix.service.impl;
 
+import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.vectrans.aimatrix.dto.AgentRequest;
@@ -10,7 +11,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import reactor.core.publisher.Flux;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -22,6 +25,40 @@ public class AgentServiceImpl implements AgentService {
 
     public AgentServiceImpl(ReactAgent reactAgent) {
         this.reactAgent = reactAgent;
+    }
+
+    @Override
+    public Flux<String> streamChat(AgentRequest request) {
+        if (!StringUtils.hasText(request.getMessage())) {
+            return Flux.error(new IllegalArgumentException("消息内容不能为空"));
+        }
+        String sessionId = StringUtils.hasText(request.getSessionId())
+                ? request.getSessionId()
+                : UUID.randomUUID().toString();
+        log.info("Agent streamChat - sessionId: {}, message: {}", sessionId, request.getMessage());
+
+        RunnableConfig config = RunnableConfig.builder()
+                .threadId(sessionId)
+                .build();
+
+        return Flux.defer(() -> {
+            try {
+                return reactAgent.stream(request.getMessage(), config);
+            } catch (Exception e) {
+                return Flux.<com.alibaba.cloud.ai.graph.NodeOutput>error(e);
+            }
+        })
+                .filter(NodeOutput::isEND)
+                .map(nodeOutput -> {
+                    List<?> messages = nodeOutput.state().value("messages", List.class).orElse(List.of());
+                    for (int i = messages.size() - 1; i >= 0; i--) {
+                        if (messages.get(i) instanceof AssistantMessage msg) {
+                            return msg.getText() != null ? msg.getText() : "";
+                        }
+                    }
+                    return "";
+                })
+                .doOnError(e -> log.error("Agent stream failed - sessionId: {}", sessionId, e));
     }
 
     @Override
@@ -38,8 +75,7 @@ public class AgentServiceImpl implements AgentService {
                     .threadId(sessionId)
                     .build();
             AssistantMessage response = reactAgent.call(request.getMessage(), config);
-            String reply = response.getText() != null ? response.getText() : "";
-            log.info("Agent reply - sessionId: {}, reply length: {}", sessionId, reply.length());
+            String reply = (response != null && response.getText() != null) ? response.getText() : "";
             return new AgentResponse(reply, sessionId);
         } catch (Exception e) {
             log.error("Agent call failed - sessionId: {}", sessionId, e);
