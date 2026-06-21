@@ -22,13 +22,26 @@ spring:
     properties:
       hibernate:
         format_sql: ${JPA_FORMAT_SQL:true}
-        dialect: org.hibernate.dialect.PostgreSQLDialect
   ai:
+    model:
+      embedding: ${AI_MODEL_EMBEDDING:dashscope}
+    vectorstore:
+      pgvector:
+        index-type: ${PGVECTOR_INDEX_TYPE:HNSW}
+        distance-type: ${PGVECTOR_DISTANCE_TYPE:COSINE_DISTANCE}
+        dimensions: ${PGVECTOR_DIMENSIONS:1024}
+        table-name: ${PGVECTOR_TABLE_NAME:vector_store}
+        initialize-schema: ${PGVECTOR_INITIALIZE_SCHEMA:true}
+        schema-validation: ${PGVECTOR_SCHEMA_VALIDATION:true}  
     dashscope:
       api-key: ${AI_DASHSCOPE_API_KEY}
       chat:
-          options:
-              model: ${AI_DASHSCOPE_CHAT_MODEL}
+        options:
+          model: ${AI_DASHSCOPE_CHAT_MODEL}
+      embedding:
+        options:
+          model: ${AI_DASHSCOPE_EMBEDDING_MODEL:text-embedding-v3}
+          dimensions: ${AI_DASHSCOPE_EMBEDDING_DIMENSIONS:1024}
 #    openai:
 #      api-key: ${OPENAI_API_KEY}
 #      base-url: ${OPENAI_BASE_URL}
