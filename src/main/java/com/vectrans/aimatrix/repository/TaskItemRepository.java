@@ -1,14 +1,14 @@
 package com.vectrans.aimatrix.repository;
 
 import com.vectrans.aimatrix.entity.TaskItem;
+import com.vectrans.aimatrix.entity.enums.TaskStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import java.time.LocalDate;
 import java.util.List;
 
 public interface TaskItemRepository extends JpaRepository<TaskItem, Long> {
 
-    List<TaskItem> findByFocusDate(LocalDate focusDate);
+    List<TaskItem> findByUserIdAndStatus(Long userId, TaskStatus status);
 
-    List<TaskItem> findByStatus(String status);
+    List<TaskItem> findByUserIdAndIsImportantAndIsUrgent(Long userId, Boolean isImportant, Boolean isUrgent);
 }

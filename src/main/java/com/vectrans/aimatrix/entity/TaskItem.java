@@ -1,45 +1,48 @@
 package com.vectrans.aimatrix.entity;
 
+import com.vectrans.aimatrix.entity.enums.TaskStatus;
 import jakarta.persistence.*;
-import java.time.LocalDate;
+
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "task_item")
+@Table(name = "task_item", indexes = {
+        @Index(name = "idx_task_user_status", columnList = "user_id, status")
+})
 public class TaskItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
+
+    @Column(nullable = false, length = 500)
     private String title;
 
-    private String description;
+    @Column(columnDefinition = "VARCHAR(20) DEFAULT 'UNCOMPLETED' CHECK (status IN ('UNCOMPLETED','COMPLETED','DELETED'))")
+    @Enumerated(EnumType.STRING)
+    private TaskStatus status = TaskStatus.UNCOMPLETED;
 
-    @Column(nullable = false)
-    private Integer priority = 0;
+    @Column(name = "is_important")
+    private Boolean isImportant = false;
 
-    @Column(nullable = false)
-    private String status = "PENDING";
-
-    @Column(name = "focus_date")
-    private LocalDate focusDate;
+    @Column(name = "is_urgent")
+    private Boolean isUrgent = false;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
     public TaskItem() {
     }
 
-    public TaskItem(String title, String description, Integer priority, LocalDate focusDate) {
+    public TaskItem(Long userId, String title) {
+        this.userId = userId;
         this.title = title;
-        this.description = description;
-        this.priority = priority;
-        this.focusDate = focusDate;
     }
 
     @PrePersist
@@ -61,6 +64,14 @@ public class TaskItem {
         this.id = id;
     }
 
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+
     public String getTitle() {
         return title;
     }
@@ -69,36 +80,28 @@ public class TaskItem {
         this.title = title;
     }
 
-    public String getDescription() {
-        return description;
-    }
-
-    public void setDescription(String description) {
-        this.description = description;
-    }
-
-    public Integer getPriority() {
-        return priority;
-    }
-
-    public void setPriority(Integer priority) {
-        this.priority = priority;
-    }
-
-    public String getStatus() {
+    public TaskStatus getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(TaskStatus status) {
         this.status = status;
     }
 
-    public LocalDate getFocusDate() {
-        return focusDate;
+    public Boolean getIsImportant() {
+        return isImportant;
     }
 
-    public void setFocusDate(LocalDate focusDate) {
-        this.focusDate = focusDate;
+    public void setIsImportant(Boolean isImportant) {
+        this.isImportant = isImportant;
+    }
+
+    public Boolean getIsUrgent() {
+        return isUrgent;
+    }
+
+    public void setIsUrgent(Boolean isUrgent) {
+        this.isUrgent = isUrgent;
     }
 
     public LocalDateTime getCreatedAt() {
@@ -111,7 +114,8 @@ public class TaskItem {
 
     @Override
     public String toString() {
-        return "TaskItem{id=" + id + ", title='" + title + "', status='" + status
-                + "', priority=" + priority + ", focusDate=" + focusDate + "}";
+        return "TaskItem{id=" + id + ", userId=" + userId + ", title='" + title
+                + "', status=" + status + ", important=" + isImportant
+                + ", urgent=" + isUrgent + "}";
     }
 }

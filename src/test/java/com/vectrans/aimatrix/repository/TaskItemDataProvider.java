@@ -2,31 +2,49 @@ package com.vectrans.aimatrix.repository;
 
 import com.vectrans.aimatrix.entity.TaskItem;
 
-import java.time.LocalDate;
 import java.util.List;
 
 final class TaskItemDataProvider {
 
+    private static final Long DEFAULT_USER_ID = 1L;
+
     private TaskItemDataProvider() {
     }
 
-    static TaskItem projectDesign(LocalDate focusDate) {
-        return new TaskItem("完成项目方案设计", "编写任务规划Agent的技术方案", 1, focusDate);
+    static TaskItem importantAndUrgent() {
+        TaskItem task = new TaskItem(DEFAULT_USER_ID, "修复线上紧急Bug");
+        task.setIsImportant(true);
+        task.setIsUrgent(true);
+        return task;
     }
 
-    static TaskItem unitTest(LocalDate focusDate) {
-        return new TaskItem("编写单元测试", "为Repository层编写集成测试", 2, focusDate);
+    static TaskItem importantNotUrgent() {
+        TaskItem task = new TaskItem(DEFAULT_USER_ID, "完成项目方案设计");
+        task.setIsImportant(true);
+        task.setIsUrgent(false);
+        return task;
     }
 
-    static TaskItem codeReview(LocalDate focusDate) {
-        return new TaskItem("代码评审", "审查PR中的代码变更", 3, focusDate);
+    static TaskItem notImportantButUrgent() {
+        TaskItem task = new TaskItem(DEFAULT_USER_ID, "回复客户邮件");
+        task.setIsImportant(false);
+        task.setIsUrgent(true);
+        return task;
     }
 
-    static TaskItem weeklyReport(LocalDate focusDate) {
-        return new TaskItem("准备周报", "总结本周工作进展", 1, focusDate);
+    static TaskItem notImportantNotUrgent() {
+        TaskItem task = new TaskItem(DEFAULT_USER_ID, "整理桌面文件");
+        task.setIsImportant(false);
+        task.setIsUrgent(false);
+        return task;
     }
 
-    static List<TaskItem> batchTasksForToday(LocalDate today) {
-        return List.of(unitTest(today), codeReview(today), weeklyReport(today.plusDays(1)));
+    static List<TaskItem> allQuadrantTasks() {
+        return List.of(
+                importantAndUrgent(),
+                importantNotUrgent(),
+                notImportantButUrgent(),
+                notImportantNotUrgent()
+        );
     }
 }
