@@ -21,6 +21,9 @@ public class AgentServiceImpl implements AgentService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentServiceImpl.class);
 
+    /** 单用户开发阶段固定 userId，后续对接认证体系后从请求中获取 */
+    private static final String CURRENT_USER_ID = "1";
+
     private final ReactAgent reactAgent;
 
     public AgentServiceImpl(ReactAgent reactAgent) {
@@ -39,6 +42,7 @@ public class AgentServiceImpl implements AgentService {
 
         RunnableConfig config = RunnableConfig.builder()
                 .threadId(sessionId)
+                .addMetadata("user_id", CURRENT_USER_ID)
                 .build();
 
         return Flux.defer(() -> {
@@ -73,6 +77,7 @@ public class AgentServiceImpl implements AgentService {
         try {
             RunnableConfig config = RunnableConfig.builder()
                     .threadId(sessionId)
+                    .addMetadata("user_id", CURRENT_USER_ID)
                     .build();
             AssistantMessage response = reactAgent.call(request.getMessage(), config);
             String reply = (response != null && response.getText() != null) ? response.getText() : "";
