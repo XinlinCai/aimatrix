@@ -81,6 +81,7 @@ public class AgentServiceImpl implements AgentService {
                     .build();
             AssistantMessage response = reactAgent.call(request.getMessage(), config);
             String reply = (response != null && response.getText() != null) ? response.getText() : "";
+            log.info("Agent reply - sessionId: {}, reply: {}", sessionId, reply);
             return new AgentResponse(reply, sessionId);
         } catch (Exception e) {
             log.error("Agent call failed - sessionId: {}", sessionId, e);
