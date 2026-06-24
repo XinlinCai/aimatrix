@@ -35,8 +35,7 @@ class TaskPlanServiceTest {
     @Autowired
     private DailyPlanRepository dailyPlanRepository;
 
-    /** 测试过程中创建的任务ID，供后续测试引用 */
-    private Long collectedTaskId;
+    /** 测试过程中创建的计划ID，供后续测试引用 */
     private Long planId;
 
     @BeforeAll
@@ -67,7 +66,6 @@ class TaskPlanServiceTest {
         assertFalse(task.getIsUrgent(), "应标记为不紧急");
         assertEquals(TaskStatus.UNCOMPLETED, task.getStatus(), "默认状态应为UNCOMPLETED");
 
-        collectedTaskId = task.getId();
         System.out.println("✅ 任务收纳成功: " + task);
     }
 

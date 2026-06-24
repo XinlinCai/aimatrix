@@ -26,7 +26,7 @@ public class TaskPlanServiceImpl implements TaskPlanService {
     private static final Logger log = LoggerFactory.getLogger(TaskPlanServiceImpl.class);
 
     /** 单用户开发阶段固定 userId */
-    private static final Long CURRENT_USER_ID = 1L;
+    private static final long CURRENT_USER_ID = 1L;
 
     /** 每日计划最大条数 */
     private static final int MAX_DAILY_PLAN_COUNT = 3;
@@ -92,6 +92,7 @@ public class TaskPlanServiceImpl implements TaskPlanService {
 
         List<DailyPlan> createdPlans = new ArrayList<>();
         for (Long taskId : taskIds) {
+            Objects.requireNonNull(taskId, "任务ID不能为null");
             TaskItem task = taskItemRepository.findById(taskId)
                     .orElseThrow(() -> new IllegalArgumentException("任务不存在，ID: " + taskId));
             if (task.getStatus() == TaskStatus.DELETED) {

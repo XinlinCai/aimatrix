@@ -24,7 +24,6 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@SuppressWarnings("null")
 class AgentE2ETest {
 
     private static final String SESSION_ID = "e2e-test-session";
