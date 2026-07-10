@@ -1,6 +1,5 @@
 package com.vectrans.aimatrix.service.impl;
 
-import com.alibaba.cloud.ai.graph.NodeOutput;
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.RunnableConfig;
 import com.vectrans.aimatrix.dto.AgentRequest;
@@ -52,7 +51,7 @@ public class AgentServiceImpl implements AgentService {
                 return Flux.<com.alibaba.cloud.ai.graph.NodeOutput>error(e);
             }
         })
-                .filter(NodeOutput::isEND)
+                .filter(nodeOutput -> nodeOutput.isEND())
                 .map(nodeOutput -> {
                     List<?> messages = nodeOutput.state().value("messages", List.class).orElse(List.of());
                     for (int i = messages.size() - 1; i >= 0; i--) {

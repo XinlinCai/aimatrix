@@ -186,9 +186,9 @@ public class TaskPlanServiceImpl implements TaskPlanService {
 
         // 按日期分组统计
         Map<LocalDate, Long> dailyCompletedCount = completedPlans.stream()
-                .collect(Collectors.groupingBy(DailyPlan::getPlanDate, Collectors.counting()));
+                .collect(Collectors.groupingBy(plan -> plan.getPlanDate(), Collectors.counting()));
         Map<LocalDate, Long> dailyTotalCount = allPlans.stream()
-                .collect(Collectors.groupingBy(DailyPlan::getPlanDate, Collectors.counting()));
+                .collect(Collectors.groupingBy(plan -> plan.getPlanDate(), Collectors.counting()));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("startDate", weekAgo);

@@ -12,8 +12,5 @@ public interface TaskItemRepository extends JpaRepository<TaskItem, Long> {
 
     List<TaskItem> findByUserIdAndIsImportantAndIsUrgent(Long userId, Boolean isImportant, Boolean isUrgent);
 
-    /**
-     * 查询用户指定状态的任务（排除 DELETED 等逻辑删除数据）
-     */
     List<TaskItem> findByUserIdAndStatusNot(Long userId, TaskStatus status);
 }
