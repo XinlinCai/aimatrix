@@ -2,6 +2,14 @@ spring:
   application:
     name: aimatrix
 
+  # Redis（短期记忆：会话状态存储）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:aimatrix}?currentSchema=public
     username: ${DB_USERNAME:root}
@@ -58,6 +66,12 @@ server:
 agent:
   name: ${AGENT_NAME:aimatrix-agent}
   max-iterations: ${AGENT_MAX_ITERATIONS:10}
+  # 记忆与上下文策略配置
+  memory:
+    # 短期记忆：单个会话保留的最大消息条数（超出后按对话轮次边界裁剪）
+    window-size: ${AGENT_MEMORY_WINDOW_SIZE:20}
+    # 长期记忆：每次检索召回的记忆条数
+    recall-top-k: ${AGENT_MEMORY_RECALL_TOP_K:5}
 
 # 日志配置
 logging:

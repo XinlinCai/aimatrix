@@ -2,8 +2,12 @@ package com.vectrans.aimatrix.config;
 
 import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.hook.modelcalllimit.ModelCallLimitHook;
-import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
+import com.alibaba.cloud.ai.graph.checkpoint.savers.redis.RedisSaver;
+import com.vectrans.aimatrix.context.ContextWindowHook;
+import com.vectrans.aimatrix.context.DynamicContextInterceptor;
+import com.vectrans.aimatrix.service.AgentMemoryService;
 import com.vectrans.aimatrix.tool.TaskTools;
+import org.redisson.api.RedissonClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +22,14 @@ public class AgentConfig {
     @Value("${agent.max-iterations:10}")
     private int maxIterations;
 
+    /** 短期记忆窗口：单会话保留的最大消息条数 */
+    @Value("${agent.memory.window-size:20}")
+    private int memoryWindowSize;
+
+    /** 长期记忆召回条数 */
+    @Value("${agent.memory.recall-top-k:5}")
+    private int memoryRecallTopK;
+
     private static final String SYSTEM_INSTRUCTION = """
             你是 AIMatrix，一个专业的智能任务规划助手，同时具备通用知识问答能力。请用中文回答用户的问题。
 
@@ -31,9 +43,13 @@ public class AgentConfig {
             5. **复盘分析**：用户要看周复盘时，调用 getWeeklyReviewData 获取数据并生成人性化报告和优化建议
             6. **通用问答**：当用户询问与任务规划无关的普通问题时（如知识问答、概念解释、闲聊等），
                直接用自己的知识回答，不需要调用任何工具
+            7. **长期记忆**：当用户表达需要被长期记住的个人偏好、习惯或事实（如"我喜欢早上处理重要任务"）时，
+               调用 remember 记录；当需要了解用户过往偏好以更好地服务时，调用 recall 检索
 
             ## 行为准则
             - 每次回答前先判断用户意图：是任务规划类需求 → 调用对应工具；是通用问题 → 直接回答
+            - 用户明确表达"记住"、"以后都"、"我习惯/我喜欢"等长期偏好时，主动调用 remember 存储
+            - 制定计划或给出个性化建议前，可先调用 recall 检索用户的长期偏好，使建议更贴合用户习惯
             - 每日计划最多安排3件事，聚焦最重要的任务
             - 每日计划推荐时，优先推荐重要且紧急的任务
             - 标记计划完成时，对应任务会自动同步为已完成，无需额外操作
@@ -42,16 +58,21 @@ public class AgentConfig {
             """;
 
     @Bean
-    public ReactAgent reactAgent(ChatModel chatModel, TaskTools taskTools) {
+    public ReactAgent reactAgent(ChatModel chatModel, TaskTools taskTools,
+                                 AgentMemoryService agentMemoryService, RedissonClient redissonClient) {
         return ReactAgent.builder()
                 .name(agentName)
                 .model(chatModel)
                 .instruction(SYSTEM_INSTRUCTION)
                 .methodTools(taskTools)
                 .hooks(ModelCallLimitHook.builder()
-                        .runLimit(maxIterations)
+                                .runLimit(maxIterations)
+                                .build(),
+                        new ContextWindowHook(memoryWindowSize))
+                .interceptors(new DynamicContextInterceptor(agentMemoryService, memoryRecallTopK))
+                .saver(RedisSaver.builder()
+                        .redisson(redissonClient)
                         .build())
-                .saver(new MemorySaver())
                 .build();
     }
 }

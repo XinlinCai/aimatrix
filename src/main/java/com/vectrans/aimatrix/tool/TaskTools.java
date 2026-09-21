@@ -2,9 +2,11 @@ package com.vectrans.aimatrix.tool;
 
 import com.vectrans.aimatrix.entity.DailyPlan;
 import com.vectrans.aimatrix.entity.TaskItem;
+import com.vectrans.aimatrix.service.AgentMemoryService;
 import com.vectrans.aimatrix.service.TaskPlanService;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -20,10 +22,20 @@ import java.util.Map;
 @Component
 public class TaskTools {
 
+    /** 单用户开发阶段固定 userId，与 AgentServiceImpl 保持一致 */
+    private static final String CURRENT_USER_ID = "1";
+
     private final TaskPlanService taskPlanService;
 
-    public TaskTools(TaskPlanService taskPlanService) {
+    private final AgentMemoryService agentMemoryService;
+
+    /** 长期记忆召回条数 */
+    @Value("${agent.memory.recall-top-k:5}")
+    private int memoryRecallTopK;
+
+    public TaskTools(TaskPlanService taskPlanService, AgentMemoryService agentMemoryService) {
         this.taskPlanService = taskPlanService;
+        this.agentMemoryService = agentMemoryService;
     }
 
     // ==================== 1. 任务收纳 ====================
@@ -180,6 +192,29 @@ public class TaskTools {
         sb.append(String.format("未完成: %d\n", pending));
         sb.append(String.format("完成率: %s\n", rate));
 
+        return sb.toString();
+    }
+
+    // ==================== 6. 长期记忆 ====================
+
+    @Tool(description = "记住用户的长期偏好、习惯或重要事实，用于跨会话记忆。当用户表达需要被长期记住的信息时调用。")
+    public String remember(
+            @ToolParam(description = "需要长期记住的内容，用简洁的陈述句描述") String content) {
+        agentMemoryService.remember(CURRENT_USER_ID, content);
+        return String.format("已记住：%s", content);
+    }
+
+    @Tool(description = "检索与当前问题相关的长期记忆（用户历史偏好、习惯、重要事实等）。在制定计划或给出个性化建议前调用。")
+    public String recall(
+            @ToolParam(description = "检索关键词或问题描述") String query) {
+        List<String> memories = agentMemoryService.recall(CURRENT_USER_ID, query, memoryRecallTopK);
+        if (memories.isEmpty()) {
+            return "没有检索到相关的长期记忆。";
+        }
+        StringBuilder sb = new StringBuilder("召回到的长期记忆（共").append(memories.size()).append("条）：\n");
+        for (int i = 0; i < memories.size(); i++) {
+            sb.append(String.format("%d. %s\n", i + 1, memories.get(i)));
+        }
         return sb.toString();
     }
 

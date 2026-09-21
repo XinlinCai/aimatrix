@@ -12,46 +12,61 @@ AIMatrix 是一个面向 AI 智能体的后端服务平台，深度集成阿里�
 |------|------|------|
 | Java | 17 | 运行时语言 |
 | Spring Boot | 3.5.9 | 基础框架 |
-| Spring AI Alibaba | 1.1.2.0 | AI Agent 框架 + DashScope 集成 |
-| PostgreSQL | 16+ | 关系数据库 |
-| PgVector | - | 向量存储（支持语义记忆） |
+| Spring AI | 1.1.2 | 模型抽象、工具调用、向量存储 |
+| Spring AI Alibaba | 1.1.2.0 | AI Agent 框架（ReactAgent）+ DashScope 集成 |
+| PostgreSQL | 16+ | 关系数据库（业务数据） |
+| PgVector | - | 向量存储（长期记忆语义检索） |
+| Redis | 7+ | 短期记忆（会话状态）存储，本地验证于 8.x |
+| Redisson | 3.22.0 | Redis 客户端（框架 RedisSaver 依赖） |
 | Project Reactor | - | 响应式流支持（Flux/Mono） |
-| Maven | - | 项目构建工具 |
+| Maven | 3.8+ | 项目构建工具 |
 
 ## 项目结构
 
 ```
 src/main/java/com/vectrans/aimatrix/
-├── AimatrixApplication.java      # 应用入口
+├── AimatrixApplication.java           # 应用入口
 ├── config/
-│   └── AgentConfig.java          # ReactAgent 配置（系统指令、模型、工具）
+│   ├── AgentConfig.java               # ReactAgent 装配（模型、工具、Hook、拦截器、Saver）
+│   └── RedisConfig.java               # RedissonClient 装配（框架 RedisSaver 依赖）
+├── context/                           # 上下文工程（调用前的裁剪与动态注入）
+│   ├── ContextWindowHook.java         # 滑动窗口裁剪 Hook（BEFORE_MODEL，按消息条数裁剪并写回状态）
+│   └── DynamicContextInterceptor.java # 动态注入运行时日期与长期记忆（不写回状态）
 ├── controller/
-│   └── AgentController.java      # REST API 端点
+│   └── AgentController.java           # REST API 端点（阻塞 + SSE 流式）
 ├── dto/
-│   ├── AgentRequest.java         # 请求体：消息 + 会话ID
-│   └── AgentResponse.java        # 响应体：回复 + 会话ID
+│   ├── AgentRequest.java              # 请求体：message + sessionId
+│   └── AgentResponse.java             # 响应体：reply + sessionId
 ├── entity/
-│   ├── DailyPlan.java            # 每日计划实体
-│   ├── TaskItem.java             # 任务实体
+│   ├── DailyPlan.java                 # 每日计划实体
+│   ├── TaskItem.java                  # 任务实体
 │   └── enums/
-│       ├── PlanStatus.java       # 计划状态（PENDING/COMPLETED）
-│       └── TaskStatus.java       # 任务状态（UNCOMPLETED/COMPLETED/DELETED）
+│       ├── PlanStatus.java            # 计划状态（PENDING/COMPLETED）
+│       └── TaskStatus.java            # 任务状态（UNCOMPLETED/COMPLETED/DELETED）
 ├── repository/
-│   ├── DailyPlanRepository.java  # 每日计划 JPA 仓库
-│   └── TaskItemRepository.java   # 任务 JPA 仓库
+│   ├── DailyPlanRepository.java       # 每日计划 JPA 仓库
+│   └── TaskItemRepository.java        # 任务 JPA 仓库
 ├── service/
-│   ├── AgentService.java         # Agent 核心服务接口
-│   ├── TaskPlanService.java      # 任务规划业务接口（5条业务线）
+│   ├── AgentService.java              # Agent 对话服务（阻塞/流式）
+│   ├── AgentMemoryService.java        # 长期记忆服务接口（PgVector 语义检索）
+│   ├── TaskPlanService.java           # 任务规划业务接口（5 条业务线）
 │   └── impl/
-│       ├── AgentServiceImpl.java # Agent 流式和阻塞式对话实现
-│       └── TaskPlanServiceImpl.java # 任务规划业务实现
+│       ├── AgentServiceImpl.java      # Agent 会话与 threadId 管理
+│       ├── AgentMemoryServiceImpl.java# 长期记忆读写（按 userId 隔离）
+│       └── TaskPlanServiceImpl.java   # 任务规划业务实现
 └── tool/
-    └── TaskTools.java            # Agent 工具集（@Tool 注解暴露给 LLM）
+    └── TaskTools.java                 # Agent 工具集（@Tool：任务规划 + remember/recall）
+
+src/test/java/com/vectrans/aimatrix/
+├── context/                           # 上下文工程纯单元测试（不启动 Spring 容器）
+├── controller/AgentE2ETest.java       # 端到端测试（真实 LLM）
+├── repository/                        # JPA 数据访问层测试
+└── service/                           # 业务与记忆集成测试
 ```
 
 ## 核心业务：智能任务规划助手
 
-Agent 通过 ReAct 模式（思考→行动→观察循环）与用户交互，覆盖 **5 条核心业务线**：
+Agent 通过 ReAct 模式（思考→行动→观察循环）与用户交互，覆盖 **5 条核心业务线**，并具备**长期记忆**与**通用问答**能力：
 
 ### 1. 任务收纳
 用户用自然语言描述待办事项，Agent 调用 `collectTask` 自动解析标题、重要性和紧急性并存储。
@@ -71,6 +86,36 @@ Agent 通过 ReAct 模式（思考→行动→观察循环）与用户交互，�
 
 ### 5. 复盘分析
 基于近一周的计划数据，统计完成率、每日分布，生成人性化复盘报告和优化建议。
+
+### 6. 长期记忆
+用户表达需要长期记住的偏好、习惯或重要事实时，Agent 调用 `remember` 写入 PgVector（按 `userId` 隔离）；
+在制定计划或给出个性化建议前，通过 `recall` 按语义相似度召回，亦可由动态拦截器自动注入上下文。
+
+### 7. 通用问答
+对与任务规划无关的普通问题（知识问答、概念解释、闲聊等），Agent 直接作答、不触发工具调用。
+
+## 记忆与上下文架构
+
+AIMatrix 将"记忆"分为**短期**与**长期**两层，并在每次模型调用前叠加一层**上下文工程**对输入做动态加工。
+
+### 短期记忆（会话状态）
+
+- **载体**：由框架 `RedisSaver`（基于 Redisson）持久化到 Redis，整段会话状态序列化后存储，**非加密**（序列化 + Base64 编码）
+- **入口**：`AgentServiceImpl` 以请求中的 `sessionId` 作为 LangGraph 的 `threadId`，相同 `sessionId` 复用同一会话状态
+- **策略**：`ContextWindowHook`（`BEFORE_MODEL` 钩子）在每次模型调用前按**消息条数**（默认 20）裁剪历史，先回退到最近的 `UserMessage` 边界，避免切断"工具调用—工具返回"配对；裁剪结果**写回图状态**并随 Checkpoint 持久化
+- **注意**：框架写入的 Redis 键不设 TTL，需在 Redis 侧配置淘汰策略（见 [环境要求](#环境要求)）
+
+### 长期记忆（语义记忆）
+
+- **载体**：PgVector `vector_store` 表，按 `userId` 元数据隔离
+- **读写**：`AgentMemoryService.remember` / `recall`，Agent 通过 `@Tool` 暴露的 `remember` / `recall` 主动存取，也可由动态拦截器在调用前自动注入
+
+### 上下文工程（模型调用前加工）
+
+| 组件 | 时机 | 行为 | 是否写回状态 |
+|------|------|------|--------------|
+| `ContextWindowHook` | 模型调用前 | 滑动窗口裁剪历史消息 | 是（随 Checkpoint 持久化） |
+| `DynamicContextInterceptor` | 模型调用前 | 将"运行时日期"与"长期记忆召回"拼接进系统消息 | 否（仅作用于本次请求） |
 
 ## API 端点
 
@@ -97,36 +142,71 @@ Agent 通过 ReAct 模式（思考→行动→观察循环）与用户交互，�
 }
 ```
 
+### 调用示例
+
+```bash
+# 阻塞式对话
+curl -s http://localhost:8080/api/agent/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"帮我记一个任务：明天下午三点开会","sessionId":"demo-001"}'
+
+# 流式对话（SSE）
+curl -N http://localhost:8080/api/agent/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"帮我制定今日计划","sessionId":"demo-001"}'
+```
+
 ## 快速开始
 
 ### 环境要求
 
 - JDK 17+
 - PostgreSQL 16+（需启用 pgvector 扩展）
+- Redis 7+（短期记忆会话状态存储）
 - Maven 3.8+
+
+> **Redis 运维提示**：框架 `RedisSaver` 写入的会话键**不设置 TTL**。为避免内存无限增长，
+> 需在 Redis 侧配置内存上限与淘汰策略，例如 `maxmemory 256mb` + `maxmemory-policy allkeys-lru`。
 
 ### 配置
 
-1. 复制 `.env` 文件并配置环境变量（已预填默认值）
+1. 复制 `.env` 文件并配置环境变量（已预填默认值；`.env` 已被 `.gitignore` 忽略）
 2. 关键配置项：
 
 ```bash
-# 数据库
+# PostgreSQL（业务数据）
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=aimatrix
 DB_USERNAME=xinlin
 DB_PASSWORD=***
 
+# Redis（短期记忆）
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DATABASE=0
+
+# PgVector（长期记忆）
+PGVECTOR_INDEX_TYPE=HNSW
+PGVECTOR_DISTANCE_TYPE=COSINE_DISTANCE
+PGVECTOR_DIMENSIONS=1024
+PGVECTOR_TABLE_NAME=vector_store
+
 # DashScope 大模型
 AI_DASHSCOPE_API_KEY=sk-***
 AI_DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com
-AI_DASHSCOPE_CHAT_MODEL=glm-5.2
-AI_DASHSCOPE_EMBEDDING_MODEL=text-embedding-v3
+AI_DASHSCOPE_CHAT_MODEL=qwen3.7-max
+AI_DASHSCOPE_EMBEDDING_MODEL=qwen3.7-text-embedding
+AI_DASHSCOPE_EMBEDDING_DIMENSIONS=1024
 
 # Agent
 AGENT_NAME=aimatrix-agent
 AGENT_MAX_ITERATIONS=10
+# 短期记忆窗口：单会话保留的最大消息条数（默认 20）
+AGENT_MEMORY_WINDOW_SIZE=20
+# 长期记忆召回条数（默认 5）
+AGENT_MEMORY_RECALL_TOP_K=5
 ```
 
 ### 启动
@@ -144,19 +224,31 @@ java -jar target/aimatrix-server-0.0.1-SNAPSHOT.jar
 
 ### 测试
 
+测试按 **纯单元测试 → 集成测试 → 端到端测试** 三层组织，越靠后外部依赖越重：
+
 ```bash
-# 运行所有测试
+# 全量测试（含 E2E，需可访问 DashScope API）
 ./mvnw test
 
-# 运行指定测试类
-./mvnw test -Dtest=TaskPlanServiceTest
+# 仅纯单元测试（不启动 Spring 容器，无需数据库 / 大模型）
+./mvnw test -Dtest=ContextWindowHookTest,DynamicContextInterceptorTest
+
+# 业务与数据访问集成测试（需 PostgreSQL，部分需 PgVector）
+./mvnw test -Dtest=TaskPlanServiceTest,AgentMemoryServiceTest,DailyPlanRepositoryTest,TaskItemRepositoryTest
+
+# 端到端测试（真实调用 LLM）
 ./mvnw test -Dtest=AgentE2ETest
 ```
 
-测试覆盖：
-- **TaskPlanServiceTest**: 5 条业务线的完整集成测试（18 个测试用例）
-- **AgentE2ETest**: 端到端核心流程测试（7 个有序步骤）
-- **Repository 测试**: JPA 数据访问层测试
+| 层次 | 测试类 | 用例数 | 依赖 |
+|------|--------|-------:|------|
+| 纯单元测试 | `ContextWindowHookTest` | 5 | 无（不启动 Spring 容器） |
+| 纯单元测试 | `DynamicContextInterceptorTest` | 2 | 无（桩实现记忆服务） |
+| 业务集成测试 | `TaskPlanServiceTest` | 20 | PostgreSQL |
+| 业务集成测试 | `AgentMemoryServiceTest` | 6 | PostgreSQL + PgVector + DashScope |
+| 数据访问测试 | `DailyPlanRepositoryTest` | 9 | PostgreSQL |
+| 数据访问测试 | `TaskItemRepositoryTest` | 8 | PostgreSQL |
+| 端到端测试 | `AgentE2ETest` | 9 | PostgreSQL + Redis + DashScope（真实 LLM） |
 
 ## 设计要点
 
@@ -164,4 +256,8 @@ java -jar target/aimatrix-server-0.0.1-SNAPSHOT.jar
 - **@Tool 注解**: 通过 Spring AI 的 `@Tool` 注解将 Java 方法暴露为 Agent 可用工具，LLM 自动判断调用时机
 - **状态不可逆**: COMPLETED 状态不允许回退，违反该规则时 Agent 会引导用户重新创建任务
 - **单用户模式**: 当前 userId 固定为 1，后续可对接认证体系后从请求中动态获取
+- **分层记忆**: 短期记忆（会话状态）存 Redis，由框架 RedisSaver 维护；长期记忆存 PgVector，按 userId 隔离
+- **裁剪对齐语义边界**: 滑动窗口按消息条数裁剪时，先回退到最近的 `UserMessage` 边界，避免切断"工具调用—工具返回"配对导致模型报错
+- **运行时上下文与持久状态解耦**: 日期、长期记忆等每次都可能变化的上下文由拦截器在调用前临时拼接，不写回会话状态，避免污染 Checkpoint
+- **降级容错**: 动态上下文注入失败时自动降级为原始请求，记录 warn 日志但不阻断主链路
 - **流式响应**: 支持 `Flux<String>` 流式输出，适配前端实时展示需求
