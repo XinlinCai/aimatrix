@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 长期记忆服务实现：基于 PgVector 的向量化记忆存取
@@ -46,15 +47,19 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         if (!StringUtils.hasText(userId) || !StringUtils.hasText(content)) {
             return;
         }
+        // 空分析模式下表达式为「未注解」类型，向 @NonNull 参数传递前显式收敛为非空
+        String safeUserId = Objects.requireNonNull(userId);
+        String safeContent = Objects.requireNonNull(content);
         try {
-            Document document = new Document(content, Map.of(
-                    META_USER_ID, userId,
+            Map<String, Object> metadata = Objects.requireNonNull(Map.of(
+                    META_USER_ID, safeUserId,
                     META_TYPE, TYPE_LONG_TERM,
                     META_CREATED_AT, Instant.now().toString()));
-            vectorStore.add(List.of(document));
-            log.debug("长期记忆已写入 - userId: {}, content: {}", userId, content);
+            Document document = new Document(safeContent, metadata);
+            vectorStore.add(Objects.requireNonNull(List.of(document)));
+            log.debug("长期记忆已写入 - userId: {}, content: {}", safeUserId, safeContent);
         } catch (Exception e) {
-            log.warn("长期记忆写入失败，忽略该记忆 - userId: {}, error: {}", userId, e.getMessage());
+            log.warn("长期记忆写入失败，忽略该记忆 - userId: {}, error: {}", safeUserId, e.getMessage());
         }
     }
 
@@ -63,13 +68,16 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
         if (!StringUtils.hasText(userId) || !StringUtils.hasText(query)) {
             return List.of();
         }
+        // 空分析模式下表达式为「未注解」类型，向 @NonNull 参数传递前显式收敛为非空
+        String safeUserId = Objects.requireNonNull(userId);
+        String safeQuery = Objects.requireNonNull(query);
         int limit = topK > 0 ? topK : defaultTopK;
         try {
             Filter.Expression filter = new FilterExpressionBuilder()
-                    .eq(META_USER_ID, userId)
+                    .eq(META_USER_ID, safeUserId)
                     .build();
             SearchRequest searchRequest = SearchRequest.builder()
-                    .query(query)
+                    .query(safeQuery)
                     .topK(limit)
                     .filterExpression(filter)
                     .build();
@@ -78,11 +86,11 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
                 return List.of();
             }
             return documents.stream()
-                    .map(Document::getText)
+                    .map(document -> Objects.requireNonNull(document).getText())
                     .filter(StringUtils::hasText)
                     .toList();
         } catch (Exception e) {
-            log.warn("长期记忆检索失败，降级为空 - userId: {}, error: {}", userId, e.getMessage());
+            log.warn("长期记忆检索失败，降级为空 - userId: {}, error: {}", safeUserId, e.getMessage());
             return List.of();
         }
     }

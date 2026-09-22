@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 动态上下文注入拦截器（模型调用前生效，流式/非流式通用）
@@ -82,10 +83,13 @@ public class DynamicContextInterceptor extends ModelInterceptor {
      * 将注入内容合并进系统消息：已有系统消息时追加，否则新建
      */
     private SystemMessage mergeSystemMessage(SystemMessage original, String injection) {
+        // 空分析模式下表达式为「未注解」类型，向 @NonNull 参数传递前显式收敛为非空
         if (original != null && StringUtils.hasText(original.getText())) {
-            return new SystemMessage(original.getText() + injection);
+            String merged = original.getText() + injection;
+            return new SystemMessage(Objects.requireNonNull(merged));
         }
-        return new SystemMessage(injection.trim());
+        String trimmedInjection = Objects.requireNonNull(injection).trim();
+        return new SystemMessage(Objects.requireNonNull(trimmedInjection));
     }
 
     private String resolveUserId(ModelRequest request) {
