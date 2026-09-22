@@ -5,6 +5,7 @@ import com.alibaba.cloud.ai.graph.agent.hook.HookPosition;
 import com.alibaba.cloud.ai.graph.agent.hook.HookPositions;
 import com.alibaba.cloud.ai.graph.agent.hook.messages.AgentCommand;
 import com.alibaba.cloud.ai.graph.agent.hook.messages.MessagesModelHook;
+import com.vectrans.aimatrix.observability.ObservabilityRecorder;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -28,18 +29,48 @@ public class ContextWindowHook extends MessagesModelHook {
     public static final int DEFAULT_WINDOW_SIZE = 20;
 
     private final int windowSize;
+    private final ObservabilityRecorder recorder;
 
     public ContextWindowHook() {
-        this(DEFAULT_WINDOW_SIZE);
+        this(DEFAULT_WINDOW_SIZE, null);
     }
 
     public ContextWindowHook(int windowSize) {
+        this(windowSize, null);
+    }
+
+    public ContextWindowHook(int windowSize, ObservabilityRecorder recorder) {
         this.windowSize = windowSize > 0 ? windowSize : DEFAULT_WINDOW_SIZE;
+        this.recorder = recorder;
     }
 
     @Override
     public AgentCommand beforeModel(List<Message> previousMessages, RunnableConfig config) {
-        return new AgentCommand(applyWindow(previousMessages, windowSize));
+        List<Message> windowed = applyWindow(previousMessages, windowSize);
+        reportTrim(previousMessages, windowed, config);
+        return new AgentCommand(windowed);
+    }
+
+    /**
+     * 上报窗口裁剪结果：不区分是否发生裁剪，一律上报原始消息条数。
+     * <p>
+     * 日志中的 {@code trim=removed/original} 需要靠 {@code original} 表达「当前上下文规模」，
+     * 若未裁剪时直接跳过上报，则该字段恒为 0，与「0 条消息」无法区分。
+     * <p>
+     * 指标侧只在 {@code removed > 0} 时累加（见 {@link ObservabilityRecorder#recordContextTrim}），
+     * 因此无裁剪轮次不会污染指标。
+     * <p>
+     * 观测失败必须静默，不得影响上下文构建。
+     */
+    private void reportTrim(List<Message> original, List<Message> windowed, RunnableConfig config) {
+        if (recorder == null || !recorder.isEnabled()) {
+            return;
+        }
+        int originalSize = original == null ? 0 : original.size();
+        int windowedSize = windowed == null ? 0 : windowed.size();
+        String sessionId = config == null ? null : config.threadId().orElse(null);
+        // 裁剪算法保证 windowedSize <= originalSize，取 max 仅作防御
+        recorder.recordContextTrim(sessionId, Math.max(0, originalSize - windowedSize), originalSize);
     }
 
     @Override

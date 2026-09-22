@@ -22,15 +22,21 @@ class TaskItemRepositoryTest {
     @Autowired
     private TaskItemRepository taskItemRepository;
 
+    @Autowired
+    private DailyPlanRepository dailyPlanRepository;
+
     private Long savedTaskId;
 
     @BeforeAll
     void init() {
+        // 先清理子表 daily_plan，再清理父表 task_item（外键约束顺序）
+        dailyPlanRepository.deleteAll();
         taskItemRepository.deleteAll();
     }
 
     @AfterAll
     void cleanup() {
+        dailyPlanRepository.deleteAll();
         taskItemRepository.deleteAll();
     }
 

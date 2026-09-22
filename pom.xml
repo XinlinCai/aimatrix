@@ -134,6 +134,11 @@
             <artifactId>redisson</artifactId>
             <version>3.22.0</version>
         </dependency>
+        <!-- Actuator（可观测：激活框架自带的 token/耗时/向量库/工具调用观测指标，并提供 /actuator/metrics 端点） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

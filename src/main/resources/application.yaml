@@ -72,6 +72,16 @@ agent:
     window-size: ${AGENT_MEMORY_WINDOW_SIZE:20}
     # 长期记忆：每次检索召回的记忆条数
     recall-top-k: ${AGENT_MEMORY_RECALL_TOP_K:5}
+    # 长期记忆：检索相似度下限，低于该值的记忆不再注入（过滤低相关噪声，<=0 表示不限制）
+    similarity-threshold: ${AGENT_MEMORY_SIMILARITY_THRESHOLD:0.5}
+  # 可观测配置（进程内轻量观测：自研埋点走单行日志，框架指标走 Actuator 端点）
+  observability:
+    # 总开关：关闭后不采集、不打印，行为与未接入观测时完全一致
+    enabled: ${AGENT_OBS_ENABLED:true}
+    # 单次模型调用耗时超过该阈值时，日志中标记 slow=true（毫秒）
+    slow-call-threshold-ms: ${AGENT_OBS_SLOW_CALL_THRESHOLD_MS:5000}
+    # 是否在日志中输出提示词/回复原文（默认关闭，避免敏感信息外泄与日志膨胀）
+    log-payload: ${AGENT_OBS_LOG_PAYLOAD:false}
 
 # 日志配置
 logging:
@@ -82,3 +92,13 @@ logging:
     # com.alibaba.cloud.ai.graph: DEBUG
     # com.alibaba.cloud.ai.dashscope: DEBUG
     # org.springframework.ai.chat: DEBUG
+
+# Actuator 端点（被动拉取框架自带指标：token 用量、模型耗时、向量库、工具调用）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,metrics}
+  endpoint:
+    health:
+      show-details: ${MANAGEMENT_HEALTH_SHOW_DETAILS:never}

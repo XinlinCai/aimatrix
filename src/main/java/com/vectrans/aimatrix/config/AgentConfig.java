@@ -5,6 +5,8 @@ import com.alibaba.cloud.ai.graph.agent.hook.modelcalllimit.ModelCallLimitHook;
 import com.alibaba.cloud.ai.graph.checkpoint.savers.redis.RedisSaver;
 import com.vectrans.aimatrix.context.ContextWindowHook;
 import com.vectrans.aimatrix.context.DynamicContextInterceptor;
+import com.vectrans.aimatrix.observability.ObservabilityInterceptor;
+import com.vectrans.aimatrix.observability.ObservabilityRecorder;
 import com.vectrans.aimatrix.service.AgentMemoryService;
 import com.vectrans.aimatrix.tool.TaskTools;
 import org.redisson.api.RedissonClient;
@@ -29,6 +31,13 @@ public class AgentConfig {
     /** 长期记忆召回条数 */
     @Value("${agent.memory.recall-top-k:5}")
     private int memoryRecallTopK;
+
+    /**
+     * 运行时模型名：仅用于给观测层兜底（框架请求侧读不到模型名）。
+     * 与 ChatModel 复用同一配置项，保证日志中的 model 与实际调用模型一致。
+     */
+    @Value("${spring.ai.dashscope.chat.options.model:}")
+    private String chatModelName;
 
     private static final String SYSTEM_INSTRUCTION = """
             你是 AIMatrix，一个专业的智能任务规划助手，同时具备通用知识问答能力。请用中文回答用户的问题。
@@ -59,7 +68,8 @@ public class AgentConfig {
 
     @Bean
     public ReactAgent reactAgent(ChatModel chatModel, TaskTools taskTools,
-                                 AgentMemoryService agentMemoryService, RedissonClient redissonClient) {
+                                 AgentMemoryService agentMemoryService, RedissonClient redissonClient,
+                                 ObservabilityRecorder observabilityRecorder) {
         return ReactAgent.builder()
                 .name(agentName)
                 .model(chatModel)
@@ -68,8 +78,12 @@ public class AgentConfig {
                 .hooks(ModelCallLimitHook.builder()
                                 .runLimit(maxIterations)
                                 .build(),
-                        new ContextWindowHook(memoryWindowSize))
-                .interceptors(new DynamicContextInterceptor(agentMemoryService, memoryRecallTopK))
+                        new ContextWindowHook(memoryWindowSize, observabilityRecorder))
+                // 拦截器链顺序：interceptors[0] 最外层。
+                // ObservabilityInterceptor 必须置于最后（最内层），其 handler.call() 才等价于纯模型调用，
+                // 避免把长期记忆检索耗时误计入模型耗时。
+                .interceptors(new DynamicContextInterceptor(agentMemoryService, memoryRecallTopK, observabilityRecorder),
+                        new ObservabilityInterceptor(observabilityRecorder, chatModelName))
                 .saver(RedisSaver.builder()
                         .redisson(redissonClient)
                         .build())

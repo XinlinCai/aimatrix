@@ -43,6 +43,12 @@ src/main/java/com/vectrans/aimatrix/
 │   └── enums/
 │       ├── PlanStatus.java            # 计划状态（PENDING/COMPLETED）
 │       └── TaskStatus.java            # 任务状态（UNCOMPLETED/COMPLETED/DELETED）
+├── observability/                     # 进程内轻量观测（采集 → 单行日志 / Micrometer 指标）
+│   ├── ObservabilityInterceptor.java  # 模型调用观测拦截器（拦截器链最内层，采集 token/工具/耗时）
+│   ├── ObservabilityRecorder.java     # 会话级累加器 + 指标注册 + 事件组装
+│   ├── ObservabilitySink.java         # 输出通道接口（采集与输出解耦）
+│   ├── LoggingSink.java               # 日志输出通道（单行结构化日志，grep '[OBS]' 检索）
+│   └── LlmCallEvent.java              # 一次完整对话的事件快照
 ├── repository/
 │   ├── DailyPlanRepository.java       # 每日计划 JPA 仓库
 │   └── TaskItemRepository.java        # 任务 JPA 仓库
@@ -60,6 +66,7 @@ src/main/java/com/vectrans/aimatrix/
 src/test/java/com/vectrans/aimatrix/
 ├── context/                           # 上下文工程纯单元测试（不启动 Spring 容器）
 ├── controller/AgentE2ETest.java       # 端到端测试（真实 LLM）
+├── observability/                     # 可观测拦截器纯单元测试（不启动 Spring 容器）
 ├── repository/                        # JPA 数据访问层测试
 └── service/                           # 业务与记忆集成测试
 ```
@@ -207,6 +214,14 @@ AGENT_MAX_ITERATIONS=10
 AGENT_MEMORY_WINDOW_SIZE=20
 # 长期记忆召回条数（默认 5）
 AGENT_MEMORY_RECALL_TOP_K=5
+
+# 可观测（进程内轻量观测）
+# 总开关：关闭后不采集、不打印，行为与未接入观测时完全一致
+AGENT_OBS_ENABLED=true
+# 单次模型调用耗时超过该阈值时，日志中标记 slow=true（毫秒）
+AGENT_OBS_SLOW_CALL_THRESHOLD_MS=5000
+# 是否在日志中输出提示词/回复原文（默认关闭，避免敏感信息外泄与日志膨胀）
+AGENT_OBS_LOG_PAYLOAD=false
 ```
 
 ### 启动
@@ -231,7 +246,7 @@ java -jar target/aimatrix-server-0.0.1-SNAPSHOT.jar
 ./mvnw test
 
 # 仅纯单元测试（不启动 Spring 容器，无需数据库 / 大模型）
-./mvnw test -Dtest=ContextWindowHookTest,DynamicContextInterceptorTest
+./mvnw test -Dtest=ContextWindowHookTest,DynamicContextInterceptorTest,ObservabilityInterceptorTest
 
 # 业务与数据访问集成测试（需 PostgreSQL，部分需 PgVector）
 ./mvnw test -Dtest=TaskPlanServiceTest,AgentMemoryServiceTest,DailyPlanRepositoryTest,TaskItemRepositoryTest
@@ -243,12 +258,75 @@ java -jar target/aimatrix-server-0.0.1-SNAPSHOT.jar
 | 层次 | 测试类 | 用例数 | 依赖 |
 |------|--------|-------:|------|
 | 纯单元测试 | `ContextWindowHookTest` | 5 | 无（不启动 Spring 容器） |
-| 纯单元测试 | `DynamicContextInterceptorTest` | 2 | 无（桩实现记忆服务） |
-| 业务集成测试 | `TaskPlanServiceTest` | 20 | PostgreSQL |
-| 业务集成测试 | `AgentMemoryServiceTest` | 6 | PostgreSQL + PgVector + DashScope |
-| 数据访问测试 | `DailyPlanRepositoryTest` | 9 | PostgreSQL |
-| 数据访问测试 | `TaskItemRepositoryTest` | 8 | PostgreSQL |
-| 端到端测试 | `AgentE2ETest` | 9 | PostgreSQL + Redis + DashScope（真实 LLM） |
+| 纯单元测试 | `DynamicContextInterceptorTest` | 3 | 无（桩实现记忆服务） |
+| 纯单元测试 | `ObservabilityInterceptorTest` | 9 | 无（桩 `ModelCallHandler`） |
+| 启动测试 | `AimatrixApplicationTests` | 4 | Spring 上下文 |
+| 业务集成测试 | `TaskPlanServiceTest` | 18 | PostgreSQL |
+| 业务集成测试 | `AgentMemoryServiceTest` | 4 | PostgreSQL + PgVector + DashScope |
+| 数据访问测试 | `DailyPlanRepositoryTest` | 7 | PostgreSQL |
+| 数据访问测试 | `TaskItemRepositoryTest` | 6 | PostgreSQL |
+| 端到端测试 | `AgentE2ETest` | 7 | PostgreSQL + Redis + DashScope（真实 LLM） |
+| **合计** | — | **63** | `./mvnw -o test` |
+
+## 可观测
+
+采用**进程内轻量观测**，不接入任何外部可观测平台，只用两个互补的出口：
+
+| 出口 | 内容 | 查看方式 | 模式 |
+|------|------|----------|------|
+| 自研埋点 | 一次对话一行结构化日志（token / 耗时 / 轮次 / 裁剪 / 记忆 / 工具 / 状态） | `grep '[OBS]' 应用日志` | 主动推 |
+| 框架指标 | Spring AI 自动注册的 Micrometer 指标 | `curl localhost:8080/actuator/metrics/{name}` | 被动拉 |
+
+单行日志示例：
+
+```text
+[OBS] session=demo-001 user=1 model=qwen3.7-max iter=2/10 in=1200 out=180 total=1380 costMs=3200 wallMs=3600 trim=6/26 memInject=3 memRecall=hit tools=queryTasks,remember toolCalls=2 status=OK empty=false slow=false
+```
+
+示例中各字段的**实际可达口径**（拿日志做诊断前必读）：
+
+| 字段 | 可达口径 | 说明 |
+|------|----------|------|
+| `model` | 请求侧显式模型名 > 配置项兜底 | `ReactAgent` 只把 `ChatModel` 交给框架，请求侧 `options.getModel()` 取不到模型名，此时回退配置项 `spring.ai.dashscope.chat.options.model`；两者都为空才渲染为 `-` |
+| `trim` | `removed/original`，未裁剪时 `removed=0` | `original` **恒为**本轮模型调用前的上下文消息数（未裁剪时即当前上下文规模），因此 `trim=0/N` 表达「本轮未裁剪、当前 N 条」，不再与「取不到值」的二义混淆 |
+| `memInject` | 注入的长期记忆条数 | 命中时的条数由本字段承载，不再拼接进 `memRecall` |
+| `memRecall` | `hit` / `miss` / `-` 三态 | `hit` 召回到内容、`miss` 已发起召回但无可用内容、`-` 未发起召回（缺 `user_id` 或 `query`）；三者互斥，不存在 `hit:N` 形态 |
+| `tools` / `toolCalls` | 工具名集合 / 调用次数 | 仅名字与次数，**不含参数、返回值与单次耗时** |
+
+自研 `agent.*` 指标（存内存，经 Actuator 暴露）：
+
+| 指标 | 含义 |
+|------|------|
+| `agent.react.iterations` | ReAct 循环轮次 |
+| `agent.react.limit.reached` | 触达最大轮次上限 |
+| `agent.context.trimmed.messages` | 滑动窗口裁剪的消息条数（仅 `removed > 0` 时累加，无裁剪轮次不计入，避免把 `0` 条当样本） |
+| `agent.memory.injected` | 注入的长期记忆条数 |
+| `agent.memory.recall` | 召回结果（tag `result=hit\|miss`）；仅由记忆服务在**真实检索**处上报，缓存命中不重复计数；「已尝试未命中」（日志里的 `miss`）只写事件字段、不打指标 |
+| `agent.context.degrade` | 上下文降级（tag `cause=memory_injection\|memory_recall`） |
+| `agent.answer.empty` | 空回答次数 |
+
+框架指标（`management.endpoints.web.exposure.include` 暴露 `metrics` 后可见）：
+
+| 指标 | 来源 | 说明 |
+|------|------|------|
+| `gen_ai.client.operation` | Spring AI | 模型调用耗时与 token 用量。**chat 与 embedding 混在同一条指标里**（`gen_ai.operation.name` 的取值同时含 `chat` 与 `embedding`），取数必须带 `?tag=gen_ai.operation.name:chat` 过滤，否则 embedding 调用会被一并计入 |
+| `db.vector.client.operation` | Spring AI | 向量库检索操作 |
+| ~~`spring.ai.tool`~~ | — | **本项目不会产出**：自研 `AgentToolNode` 绕过了 Spring AI 的工具观测链路，`/actuator/metrics/spring.ai.tool` 会 404，工具调用一律由自研拦截器采集 |
+
+> **读 `MAX` 的坑**：Micrometer 未开启直方图时，`*_max` 恒返回 `0.0`（`TimeWindowMax` 语义），这不代表「最大耗时为 0」或「无数据」。要回答「单次调用最坏延迟」，需先开启直方图，例如 `management.metrics.distribution.percentiles-histogram.gen_ai.client.operation=true`。当前只关心总量与均值，不开也够用。
+
+> **工具观测边界**：本项目的工具观测是**降级版**——只有工具名与调用次数（日志 `tools` / `toolCalls`），没有入参、返回值与单次耗时。要定位工具级性能问题，需自行在 `AgentToolNode` / `TaskTools` 补埋点。
+
+设计约束：
+
+- **采集与输出解耦**：采集层只依赖 `ObservabilitySink` 接口，本期仅实现日志通道 `LoggingSink`；后续接入平台只需新增一个 Sink 实现，埋点代码零改动
+- **拦截器位置**：`ObservabilityInterceptor` 必须位于拦截器链**最内层**（`AgentConfig` 中注册在最后），这样其 `handler.call()` 才等价于一次真实模型调用，不会把记忆检索耗时误计入模型耗时
+- **会话级累加器**：以 `sessionId` 为键的 `ConcurrentHashMap` 累加（流式跨线程，**不能用 ThreadLocal**）；由 `AgentServiceImpl` 控制 `startSession` / `finish` 生命周期，拦截器只负责填充
+- **流式 token 取值**：DashScope 流式返回的是**累计值**，故只取**最后一个非零 Usage**，严禁逐 chunk 累加；流终止（`doFinally`）时回填一次，与「一次模型调用」一一对应
+- **高基数红线**：`userId` / `sessionId` / 工具名仅作日志字段，**严禁用作指标 tag**，避免指标基数爆炸
+- **默认脱敏**：日志仅记录消息长度；提示词与回复原文需 `AGENT_OBS_LOG_PAYLOAD=true` 才输出，且严格渲染为单行
+- **开关可关断**：`AGENT_OBS_ENABLED=false` 时零采集、零输出、零副作用，行为与未接入观测时完全一致
+- **三态优先于冗余**：`memRecall` 只表达召回结果（`hit`/`miss`/`-`），条数交给 `memInject`；`trim` 的 `original` 一律上报，用 `removed=0` 表达「本轮未裁剪」，从字段设计上消除「取不到值」与「值为 0」的二义
 
 ## 设计要点
 

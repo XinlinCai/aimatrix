@@ -1,5 +1,6 @@
 package com.vectrans.aimatrix.service.impl;
 
+import com.vectrans.aimatrix.observability.ObservabilityRecorder;
 import com.vectrans.aimatrix.service.AgentMemoryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,12 +35,18 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
     private static final String TYPE_LONG_TERM = "long_term";
 
     private final VectorStore vectorStore;
+    private final ObservabilityRecorder recorder;
 
     @Value("${agent.memory.recall-top-k:5}")
     private int defaultTopK;
 
-    public AgentMemoryServiceImpl(VectorStore vectorStore) {
+    /** 检索相似度下限（<=0 表示不限制），用于过滤低相关的噪声记忆 */
+    @Value("${agent.memory.similarity-threshold:0.5}")
+    private double similarityThreshold;
+
+    public AgentMemoryServiceImpl(VectorStore vectorStore, ObservabilityRecorder recorder) {
         this.vectorStore = vectorStore;
+        this.recorder = recorder;
     }
 
     @Override
@@ -79,19 +86,39 @@ public class AgentMemoryServiceImpl implements AgentMemoryService {
             SearchRequest searchRequest = SearchRequest.builder()
                     .query(safeQuery)
                     .topK(limit)
+                    .similarityThreshold(similarityThreshold)
                     .filterExpression(filter)
                     .build();
             List<Document> documents = vectorStore.similaritySearch(searchRequest);
             if (documents == null || documents.isEmpty()) {
+                reportRecall(0);
                 return List.of();
             }
-            return documents.stream()
+            List<String> memories = documents.stream()
                     .map(document -> Objects.requireNonNull(document).getText())
                     .filter(StringUtils::hasText)
                     .toList();
+            reportRecall(memories.size());
+            return memories;
         } catch (Exception e) {
             log.warn("长期记忆检索失败，降级为空 - userId: {}, error: {}", safeUserId, e.getMessage());
+            reportRecallFailure();
             return List.of();
+        }
+    }
+
+    /** 上报一次召回结果（hit=命中条数>0，miss=0） */
+    private void reportRecall(int hitCount) {
+        if (recorder != null) {
+            recorder.recordMemoryRecall(hitCount);
+        }
+    }
+
+    /** 检索异常：既计为未命中，也计一次上下文降级 */
+    private void reportRecallFailure() {
+        if (recorder != null) {
+            recorder.recordMemoryRecall(0);
+            recorder.recordContextDegrade(ObservabilityRecorder.CAUSE_MEMORY_RECALL, null);
         }
     }
 
